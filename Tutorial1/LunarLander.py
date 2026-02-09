@@ -176,55 +176,78 @@ def append_line_to_csv(filepath, line):
 # TODO: IMPLEMENT HERE THE INTELLIGENT AGENT METHOD
 def move_tutorial_1(game):
     """
-    Implement your own rule-based agent to land the spacecraft.
-    
-    This method receives the current game state and must return an action:
-    - ACTION_NOTHING (0): Do nothing
-    - ACTION_LEFT_ENGINE (1): Fire left orientation engine (rotate clockwise)
-    - ACTION_MAIN_ENGINE (2): Fire main engine (slow down descent)
-    - ACTION_RIGHT_ENGINE (3): Fire right orientation engine (rotate counter-clockwise)
-    
-    Goal: Land safely between the two flags on the landing pad.
-    - Landing pad is always at coordinates (0, 0)
-    - Landing outside the pad is possible but gives less reward
-    - Crash (too fast or wrong angle) ends the episode with negative reward
-    - Successful landing gives +100 to +140 points
-    - Each leg contact gives +10 points
-    - Firing main engine costs -0.3 points per frame
-    - Firing side engines costs -0.03 points per frame
-    
-    Tips:
-    - Use y_velocity to control descent speed (should be slow when landing)
-    - Use angle to keep the lander upright (close to 0)
-    - Use x_position and x_velocity to center over the landing pad
-    
-    YOUR CODE HERE
+    Estrategia FINAL: FLOTAR Y ALINEAR (Hover & Align).
+    Garantiza aterrizaje en (0,0) sacrificando tiempo por precisión.
     """
-
-    LIMIT_SPIN = 0.04       
-    LIMIT_ANGLE = 0.1
-    TARGET_VY = -0.3
-
-    if game.angular_velocity > LIMIT_SPIN:
-        return ACTION_RIGHT_ENGINE
-
-    if game.angular_velocity < -LIMIT_SPIN:
-        return ACTION_LEFT_ENGINE  
-
-    target_angle = (game.x_position * 0.5) + (game.x_velocity * 1.0)
+    # Strict spin limit to avoid wild oscillations
+    LIMIT_SPIN = 0.03
     
-    if target_angle > LIMIT_ANGLE: target_angle = LIMIT_ANGLE
-    if target_angle < -LIMIT_ANGLE: target_angle = -LIMIT_ANGLE
+    # maximum angle (in radians) we allow for horizontal correction
+    MAX_TILT = 0.25 
+    
+    # Tolerance for considering the lander "centered" above the landing pad.
+    CENTER_TOLERANCE = 0.05
 
-    if game.angle < target_angle - 0.02:
-        return ACTION_LEFT_ENGINE
-        
+    #1. Choose whether to focus on vertical control (descending) or horizontal control (aligning).
+    
+    # to check if x is close to 0 (the center of the landing pad)
+    is_centered = abs(game.x_position) < CENTER_TOLERANCE
 
-    elif game.angle > target_angle + 0.02:
-        return ACTION_RIGHT_ENGINE
+    if is_centered:
+        # Landing phase: We're close to the center. Focus on descending safely.
+        # Target vertical velocity depends on height: Faster descent when high, slower when close.
+        target_vy = -(game.y_position * 0.5 + 0.1)
+    else:
+        # Hover phase: We're far.Do not descend.
+        # Maintain a near-zero vertical velocity (-0.05) to stay suspended in the air while correcting X.
+        target_vy = -0.05
 
-    if game.y_velocity < TARGET_VY:
-        if abs(game.angle) < 0.1 and abs(game.angular_velocity) < 0.1:
+    # 2. Horizontal control: Calculate desired tilt based on position and velocity.
+    
+    # More aggressive formula to seek the center.
+    desired_tilt = (game.x_position * 1.0) + (game.x_velocity * 1.5)
+    
+    # Clamp (limit) the desired tilt to avoid extreme angles that could cause crashes.
+    if desired_tilt > MAX_TILT: desired_tilt = MAX_TILT
+    if desired_tilt < -MAX_TILT: desired_tilt = -MAX_TILT
+    
+    # If we're very close to the ground (<0.3) and not centered, limit the tilt to avoid crashing one leg before the other.
+    if game.y_position < 0.3 and not is_centered:
+        if desired_tilt > 0.1: desired_tilt = 0.1
+        if desired_tilt < -0.1: desired_tilt = -0.1
+
+
+    # 3. Rotation control
+    
+    # We want the actual angle to match the desired_tilt
+    angle_error = desired_tilt - game.angle
+    
+    # We also use angular velocity to dampen (avoid shaking)
+
+    # If we want to increase the angle
+    if angle_error > 0.02:
+         # If we're already spinning fast in that direction, don't push more
+         if game.angular_velocity < 0.2:
+             return ACTION_LEFT_ENGINE
+             
+    # If we want to decrease the angle
+    elif angle_error < -0.02:
+         # If we're already spinning fast, calm down
+         if game.angular_velocity > -0.2:
+             return ACTION_RIGHT_ENGINE
+
+    # If we're spinning too fast out of control, stop everything
+    if game.angular_velocity > LIMIT_SPIN * 2: return ACTION_RIGHT_ENGINE
+    if game.angular_velocity < -LIMIT_SPIN * 2: return ACTION_LEFT_ENGINE
+
+
+    # 4. Execution: vertical control
+    
+    # We only fire the main engine if we're falling faster than our target_vy and the angle is safe (don't fire if we're too tilted)    
+    
+    # Safety margin: Allow firing with a slight tilt to be able to "hover and move" at the same time
+    if game.y_velocity < target_vy:
+        if abs(game.angle) < 0.3: 
             return ACTION_MAIN_ENGINE
 
     return ACTION_NOTHING
