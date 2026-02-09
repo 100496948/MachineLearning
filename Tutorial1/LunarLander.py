@@ -200,35 +200,34 @@ def move_tutorial_1(game):
     
     YOUR CODE HERE
     """
-    # If both legs are on the ground, stop engines (save fuel)
-    if game.left_leg_contact and game.right_leg_contact:
-        return ACTION_NOTHING
 
-    # 1. Angle control (highest priority - avoid flipping)
-    if game.angle > 0.1 or game.angular_velocity > 0.15:
+    LIMIT_SPIN = 0.04       
+    LIMIT_ANGLE = 0.1
+    TARGET_VY = -0.3
+
+    if game.angular_velocity > LIMIT_SPIN:
         return ACTION_RIGHT_ENGINE
-    if game.angle < -0.1 or game.angular_velocity < -0.15:
+
+    if game.angular_velocity < -LIMIT_SPIN:
+        return ACTION_LEFT_ENGINE  
+
+    target_angle = (game.x_position * 0.5) + (game.x_velocity * 1.0)
+    
+    if target_angle > LIMIT_ANGLE: target_angle = LIMIT_ANGLE
+    if target_angle < -LIMIT_ANGLE: target_angle = -LIMIT_ANGLE
+
+    if game.angle < target_angle - 0.02:
         return ACTION_LEFT_ENGINE
+        
 
-    # 2. Vertical speed control (brake harder the closer to ground)
-    if game.y_position < 0.3 and game.y_velocity < -0.05:
-        return ACTION_MAIN_ENGINE
-    if game.y_position < 0.6 and game.y_velocity < -0.2:
-        return ACTION_MAIN_ENGINE
-    if game.y_position < 1.0 and game.y_velocity < -0.4:
-        return ACTION_MAIN_ENGINE
-    if game.y_velocity < -0.6:
-        return ACTION_MAIN_ENGINE
-
-    # 3. Horizontal centering (steer toward x = 0)
-    if game.x_position > 0.3 or (game.x_position > 0.1 and game.x_velocity > 0.1):
+    elif game.angle > target_angle + 0.02:
         return ACTION_RIGHT_ENGINE
-    if game.x_position < - 0.3 or (game.x_position < -0.1 and game.x_velocity < -0.1):
-        return ACTION_LEFT_ENGINE
 
-    # Default: do nothing (save fuel)
+    if game.y_velocity < TARGET_VY:
+        if abs(game.angle) < 0.1 and abs(game.angular_velocity) < 0.1:
+            return ACTION_MAIN_ENGINE
+
     return ACTION_NOTHING
-
 def move_keyboard(keys_pressed):
     """
     Convert keyboard input to action.
