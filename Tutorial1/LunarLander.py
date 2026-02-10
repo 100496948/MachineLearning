@@ -176,8 +176,29 @@ def append_line_to_csv(filepath, line):
 # TODO: IMPLEMENT HERE THE INTELLIGENT AGENT METHOD
 def move_tutorial_1(game):
     """
-    Estrategia FINAL: FLOTAR Y ALINEAR (Hover & Align).
-    Garantiza aterrizaje en (0,0) sacrificando tiempo por precisión.
+    Implement your own rule-based agent to land the spacecraft.
+    
+    This method receives the current game state and must return an action:
+    - ACTION_NOTHING (0): Do nothing
+    - ACTION_LEFT_ENGINE (1): Fire left orientation engine (rotate clockwise)
+    - ACTION_MAIN_ENGINE (2): Fire main engine (slow down descent)
+    - ACTION_RIGHT_ENGINE (3): Fire right orientation engine (rotate counter-clockwise)
+    
+    Goal: Land safely between the two flags on the landing pad.
+    - Landing pad is always at coordinates (0, 0)
+    - Landing outside the pad is possible but gives less reward
+    - Crash (too fast or wrong angle) ends the episode with negative reward
+    - Successful landing gives +100 to +140 points
+    - Each leg contact gives +10 points
+    - Firing main engine costs -0.3 points per frame
+    - Firing side engines costs -0.03 points per frame
+    
+    Tips:
+    - Use y_velocity to control descent speed (should be slow when landing)
+    - Use angle to keep the lander upright (close to 0)
+    - Use x_position and x_velocity to center over the landing pad
+    
+    YOUR CODE HERE
     """
     # Strict spin limit to avoid wild oscillations
     LIMIT_SPIN = 0.03
@@ -198,7 +219,7 @@ def move_tutorial_1(game):
         # Target vertical velocity depends on height: Faster descent when high, slower when close.
         target_vy = -(game.y_position * 0.5 + 0.1)
     else:
-        # Hover phase: We're far.Do not descend.
+        # Hover phase: We're far so we still do not descend.
         # Maintain a near-zero vertical velocity (-0.05) to stay suspended in the air while correcting X.
         target_vy = -0.05
 
@@ -211,7 +232,7 @@ def move_tutorial_1(game):
     if desired_tilt > MAX_TILT: desired_tilt = MAX_TILT
     if desired_tilt < -MAX_TILT: desired_tilt = -MAX_TILT
     
-    # If we're very close to the ground (<0.3) and not centered, limit the tilt to avoid crashing one leg before the other.
+    # If we're very close to the ground (<0.3) and not centered, limit the tilt to avoid crashing one leg before the other
     if game.y_position < 0.3 and not is_centered:
         if desired_tilt > 0.1: desired_tilt = 0.1
         if desired_tilt < -0.1: desired_tilt = -0.1
@@ -222,8 +243,7 @@ def move_tutorial_1(game):
     # We want the actual angle to match the desired_tilt
     angle_error = desired_tilt - game.angle
     
-    # We also use angular velocity to dampen (avoid shaking)
-
+    # We use angular velocity to dampen (avoid shaking)
     # If we want to increase the angle
     if angle_error > 0.02:
          # If we're already spinning fast in that direction, don't push more
@@ -241,9 +261,7 @@ def move_tutorial_1(game):
     if game.angular_velocity < -LIMIT_SPIN * 2: return ACTION_LEFT_ENGINE
 
 
-    # 4. Execution: vertical control
-    
-    # We only fire the main engine if we're falling faster than our target_vy and the angle is safe (don't fire if we're too tilted)    
+    # 4. Execution: vertical control. We only fire the main engine if we're falling faster than our target_vy and the angle is safe (don't fire if we're too tilted)    
     
     # Safety margin: Allow firing with a slight tilt to be able to "hover and move" at the same time
     if game.y_velocity < target_vy:
