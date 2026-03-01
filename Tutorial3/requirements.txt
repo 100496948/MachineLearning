@@ -1,0 +1,8 @@
+# Requirements for Lunar Lander Tutorial 1
+# Machine Learning I - UC3M
+# Course 2025-2026
+
+# Install with: pip install -r requirements.txt
+# Or for gymnasium with box2d: pip install "gymnasium[box2d]"
+
+gymnasium[box2d]>=0.29.0
