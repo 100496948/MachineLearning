@@ -11,54 +11,71 @@ Students will implement a rule-based agent to land the spacecraft.
 import gymnasium as gym
 import sys
 import time
+import math
+import random
 import pygame
-import os
+
+# ──────────────────────────────────────────────
+# CONFIGURATION
+# ──────────────────────────────────────────────
 
 # GRAVITY setting
-# Moon gravity   -> -1.62
-# Mars gravity   -> -3.72
-# Earth gravity  -> -9.81 (default, very hard!)
 GRAVITY = -1.62
 
-# Agent mode: Set to True to use the Tutorial 1 agent, False for keyboard control
+# Agent mode: True = rule-based agent, False = keyboard control
 USE_AGENT = False
 
 # Environment configuration
 ENV_NAME = "LunarLander-v3"
 
-# we add this for Question 4
-ARFF_FILE = "all_data_lunarlander.arff"
-
 # Action definitions
-ACTION_NOTHING = 0      # Do nothing
-ACTION_LEFT_ENGINE = 1  # Fire left orientation engine
-ACTION_MAIN_ENGINE = 2  # Fire main engine (downward thrust)
-ACTION_RIGHT_ENGINE = 3 # Fire right orientation engine
+ACTION_NOTHING = 0
+ACTION_LEFT_ENGINE = 1
+ACTION_MAIN_ENGINE = 2
+ACTION_RIGHT_ENGINE = 3
 
-# Mapping from action number to nominal label for the ARFF class attribute
-ACTION_LABELS = {
-    ACTION_NOTHING: "nothing",
-    ACTION_LEFT_ENGINE: "left_engine",
-    ACTION_MAIN_ENGINE: "main_engine",
-    ACTION_RIGHT_ENGINE: "right_engine"
-}
+# ──────────────────────────────────────────────
+# ATTRIBUTE NAMES (raw + engineered)
+# ──────────────────────────────────────────────
 
+RAW_ATTRIBUTES = [
+    "x_position",
+    "y_position",
+    "x_velocity",
+    "y_velocity",
+    "angle",
+    "angular_velocity",
+    "left_leg_contact",
+    "right_leg_contact",
+]
+
+ENGINEERED_ATTRIBUTES = [
+    "euclidean_distance",       # sqrt(x^2 + y^2)
+    "total_velocity",           # sqrt(vx^2 + vy^2)
+    "fast_descent",             # 1 if vy < -0.5 else 0
+    "polar_angle_to_pad",       # atan2(y, x)
+    "abs_y_velocity",           # |vy|
+    "angle_x_angular_vel",      # angle * angular_velocity
+    "x_pos_x_x_vel",           # x_position * x_velocity
+    "y_pos_x_y_vel",           # y_position * y_velocity
+    "low_alt_high_speed",       # 1 if y < 0.3 and total_velocity > 0.5 else 0
+]
+
+# Class attribute for classification (last before reward)
+CLASS_ATTRIBUTE = "action"
+
+# Regression target
+REWARD_ATTRIBUTE = "next_reward"
+
+ALL_ATTRIBUTES = RAW_ATTRIBUTES + ENGINEERED_ATTRIBUTES + [CLASS_ATTRIBUTE, REWARD_ATTRIBUTE]
+
+
+# ──────────────────────────────────────────────
 # GAME STATE CLASS
+# ──────────────────────────────────────────────
+
 class GameState:
     def __init__(self, observation):
-        """
-        Initialize game state from Gymnasium observation.
-        
-        The LunarLander-v3 observation space consists of 8 values:
-        - obs[0]: x position (horizontal position of the lander)
-        - obs[1]: y position (vertical position of the lander)
-        - obs[2]: x velocity (horizontal velocity)
-        - obs[3]: y velocity (vertical velocity)
-        - obs[4]: angle (lander angle)
-        - obs[5]: angular velocity (rotation speed)
-        - obs[6]: left leg contact (1.0 if touching ground, 0.0 otherwise)
-        - obs[7]: right leg contact (1.0 if touching ground, 0.0 otherwise)
-        """
         self.x_position = observation[0]
         self.y_position = observation[1]
         self.x_velocity = observation[2]
@@ -67,23 +84,12 @@ class GameState:
         self.angular_velocity = observation[5]
         self.left_leg_contact = observation[6]
         self.right_leg_contact = observation[7]
-        
-        # Store raw observation for convenience
         self.observation = observation
-        
-        # Score tracking
         self.score = 0.0
         self.episode_reward = 0.0
-
-        # We add these for Question 4
-        self.tick = 0
-        self.episode = 0
-        
-        # Current action
         self.action = ACTION_NOTHING
 
     def update(self, observation, reward):
-        """Update state with new observation and reward."""
         self.x_position = observation[0]
         self.y_position = observation[1]
         self.x_velocity = observation[2]
@@ -96,22 +102,201 @@ class GameState:
         self.episode_reward += reward
         self.score = self.episode_reward
 
-        # We add this for Question 4
-        self.tick += 1
-
     def reset(self, observation):
-        """Reset state for a new episode."""
-
-        # We addthis for Question 4
-        episode = self.episode  # preserve episode number
         self.__init__(observation)
-        self.episode = episode
+
+
+# ──────────────────────────────────────────────
+# ENGINEERED FEATURES
+# ──────────────────────────────────────────────
+
+def compute_engineered_features(game):
+    """
+    Compute the 9 engineered features from the current game state.
+    Returns a list of floats in the same order as ENGINEERED_ATTRIBUTES.
+    """
+    x = game.x_position
+    y = game.y_position
+    vx = game.x_velocity
+    vy = game.y_velocity
+    ang = game.angle
+    ang_vel = game.angular_velocity
+
+    total_vel = math.sqrt(vx ** 2 + vy ** 2)
+
+    return [
+        math.sqrt(x ** 2 + y ** 2),          # euclidean_distance
+        total_vel,                             # total_velocity
+        1.0 if vy < -0.5 else 0.0,            # fast_descent
+        math.atan2(y, x),                      # polar_angle_to_pad
+        abs(vy),                               # abs_y_velocity
+        ang * ang_vel,                         # angle_x_angular_vel
+        x * vx,                                # x_pos_x_x_vel
+        y * vy,                                # y_pos_x_y_vel
+        1.0 if (y < 0.3 and total_vel > 0.5) else 0.0,  # low_alt_high_speed
+    ]
+
+
+# ──────────────────────────────────────────────
+# DATA WRITER  (dual .arff + .csv)
+# ──────────────────────────────────────────────
+
+class DataWriter:
+    """
+    Handles writing instances to .arff and .csv files simultaneously.
+    Uses a one-step buffer so that the next-timestep reward can be
+    appended to the previous instance before flushing it to disk.
+    """
+
+    def __init__(self, base_filename):
+        """
+        Args:
+            base_filename: e.g. "data_agent" or "data_keyboard"
+                           Files created: <base_filename>.arff, <base_filename>.csv
+        """
+        self.arff_path = f"{base_filename}.arff"
+        self.csv_path = f"{base_filename}.csv"
+
+        # Open files
+        self.arff_file = open(self.arff_path, "w")
+        self.csv_file = open(self.csv_path, "w")
+
+        # Write headers
+        self._write_arff_header()
+        self._write_csv_header()
+
+        # One-step buffer: stores the previous instance (without next_reward)
+        self.buffer = None
+
+        self.instance_count = 0
+
+    def _write_arff_header(self):
+        """Write the ARFF header with relation name and attribute declarations."""
+        self.arff_file.write("@RELATION lunarlander\n\n")
+
+        # Raw attributes (all numeric)
+        for attr in RAW_ATTRIBUTES:
+            self.arff_file.write(f"@ATTRIBUTE {attr} NUMERIC\n")
+
+        # Engineered attributes (all numeric)
+        for attr in ENGINEERED_ATTRIBUTES:
+            self.arff_file.write(f"@ATTRIBUTE {attr} NUMERIC\n")
+
+        # Action — nominal with 4 possible values
+        self.arff_file.write("@ATTRIBUTE action {0,1,2,3}\n")
+
+        # Next-timestep reward — numeric (regression target)
+        self.arff_file.write("@ATTRIBUTE next_reward NUMERIC\n")
+
+        self.arff_file.write("\n@DATA\n")
+        self.arff_file.flush()
+
+    def _write_csv_header(self):
+        """Write the CSV header row."""
+        self.csv_file.write(",".join(ALL_ATTRIBUTES) + "\n")
+        self.csv_file.flush()
+
+    def buffer_instance(self, game):
+        """
+        Store the current state + action in the buffer.
+        If there was a previous buffered instance, it is flushed first
+        (this should not happen in normal flow — see flush_with_reward).
+        """
+        # Build feature vector: raw + engineered + action
+        raw = [
+            game.x_position,
+            game.y_position,
+            game.x_velocity,
+            game.y_velocity,
+            game.angle,
+            game.angular_velocity,
+            game.left_leg_contact,
+            game.right_leg_contact,
+        ]
+        engineered = compute_engineered_features(game)
+        action = game.action
+
+        self.buffer = raw + engineered + [action]
+
+    def flush_with_reward(self, next_reward):
+        """
+        Append the next-timestep reward to the buffered instance
+        and write the complete line to both files.
+        """
+        if self.buffer is None:
+            return
+
+        full_instance = self.buffer + [next_reward]
+
+        # Format values: round floats, keep integers clean
+        parts = []
+        for v in full_instance:
+            if isinstance(v, float):
+                parts.append(f"{v:.6f}")
+            else:
+                parts.append(str(v))
+
+        line = ",".join(parts)
+
+        self.arff_file.write(line + "\n")
+        self.csv_file.write(line + "\n")
+
+        self.instance_count += 1
+
+        # Flush every 100 instances for safety
+        if self.instance_count % 100 == 0:
+            self.arff_file.flush()
+            self.csv_file.flush()
+
+        # Clear buffer
+        self.buffer = None
+
+    def discard_buffer(self):
+        """Discard the buffered instance (e.g. on episode end with no next step)."""
+        self.buffer = None
+
+    def close(self):
+        """Flush and close both files."""
+        self.arff_file.flush()
+        self.csv_file.flush()
+        self.arff_file.close()
+        self.csv_file.close()
+        print(f"[DataWriter] Saved {self.instance_count} instances to:")
+        print(f"  -> {self.arff_path}")
+        print(f"  -> {self.csv_path}")
+
+
+# ──────────────────────────────────────────────
+# print_line_data  (required by assignment)
+# ──────────────────────────────────────────────
+
+def print_line_data(game, writer):
+    """
+    Record one instance of game state data.
+
+    This function buffers the current state + action. The actual write
+    happens on the NEXT call (or on episode end), when the next-timestep
+    reward becomes available.
+
+    Args:
+        game:   current GameState object (already updated with this step's
+                observation and reward).
+        writer: DataWriter instance that handles file I/O.
+    """
+    # The reward received THIS step is the "next_reward" for the PREVIOUS instance.
+    # So first, flush the previous buffer with this step's reward.
+    # (If there's nothing buffered yet — e.g. first step — this is a no-op.)
+    # NOTE: reward for flush is passed from the game loop, not here.
+
+    # Buffer the current state + action for the next iteration.
+    writer.buffer_instance(game)
+
+
+# ──────────────────────────────────────────────
+# PRINT STATE (terminal debug)
+# ──────────────────────────────────────────────
 
 def print_state(game):
-    """
-    Print the current game state to the terminal.
-    This function shows all available information about the lander.
-    """
     print("--------GAME STATE--------")
     print(f"Position: X={game.x_position:.3f}, Y={game.y_position:.3f}")
     print(f"Velocity: X={game.x_velocity:.3f}, Y={game.y_velocity:.3f}")
@@ -123,189 +308,62 @@ def print_state(game):
     print(f"Last Action: {game.action}")
     print("--------------------------")
 
-# TODO: IMPLEMENT HERE THE METHOD TO SAVE DATA TO FILE
-def print_line_data(game):
-    """
-    Return a string with the game state information to be saved to a file.
-    
-    This method should return a string with the relevant information from
-    the game state, with values separated by commas.
-    
-    The student should decide which features are relevant for the task.
-    
-    YOUR CODE HERE
-    """
 
-    """
+# ──────────────────────────────────────────────
+# RULE-BASED AGENT (Tutorial 1)
+# ──────────────────────────────────────────────
 
-    Relevant features selected:
-    - episode, tick: to differiantiate every episode and identify each moment in time
-    - x_position, y_position: where the lander is
-    - x_velocity, y_velocity: how fast it's moving
-    - angle, angular_velocity: orientation and rotation
-    - left_leg_contact, right_leg_contact: landing status
-    - action: what the agent decided
-    - score: cumulative reward
-
-    """
-    line = (
-        f"{game.x_position:.4f},"
-        f"{game.y_position:.4f},"
-        f"{game.x_velocity:.4f},"
-        f"{game.y_velocity:.4f},"
-        f"{game.angle:.4f},"
-        f"{game.angular_velocity:.4f},"
-        f"{int(game.left_leg_contact)},"
-        f"{int(game.right_leg_contact)},"
-        f"{ACTION_LABELS[game.action]},"
-    )
-    return line
-
-# Auziliary functions to handle the arff file
-
-# We create the header for the arff file following its format
-def get_arff_header():
-    header = (
-        "@RELATION lunar_lander\n"
-        "\n"
-        "@ATTRIBUTE x_position    NUMERIC\n"
-        "@ATTRIBUTE y_position    NUMERIC\n"
-        "@ATTRIBUTE x_velocity    NUMERIC\n"
-        "@ATTRIBUTE y_velocity    NUMERIC\n"
-        "@ATTRIBUTE angle         NUMERIC\n"
-        "@ATTRIBUTE angular_vel   NUMERIC\n"
-        "@ATTRIBUTE left_leg      {0, 1}\n"
-        "@ATTRIBUTE right_leg     {0, 1}\n"
-        "@ATTRIBUTE action        {nothing, left_engine, main_engine, right_engine}\n"
-        "\n"
-        "@DATA\n"
-    )
-    return header
-
-
-def init_arff(filepath):
-    if not os.path.exists(filepath):
-        with open(filepath, "w") as f:
-            f.write(get_arff_header())
-
-
-def append_line_to_arff(filepath, line):
-    with open(filepath, "a") as f:
-        f.write(line + "\n")
-
-
-# TODO: IMPLEMENT HERE THE INTELLIGENT AGENT METHOD
 def move_tutorial_1(game):
-    """
-    Implement your own rule-based agent to land the spacecraft.
-    
-    This method receives the current game state and must return an action:
-    - ACTION_NOTHING (0): Do nothing
-    - ACTION_LEFT_ENGINE (1): Fire left orientation engine (rotate clockwise)
-    - ACTION_MAIN_ENGINE (2): Fire main engine (slow down descent)
-    - ACTION_RIGHT_ENGINE (3): Fire right orientation engine (rotate counter-clockwise)
-    
-    Goal: Land safely between the two flags on the landing pad.
-    - Landing pad is always at coordinates (0, 0)
-    - Landing outside the pad is possible but gives less reward
-    - Crash (too fast or wrong angle) ends the episode with negative reward
-    - Successful landing gives +100 to +140 points
-    - Each leg contact gives +10 points
-    - Firing main engine costs -0.3 points per frame
-    - Firing side engines costs -0.03 points per frame
-    
-    Tips:
-    - Use y_velocity to control descent speed (should be slow when landing)
-    - Use angle to keep the lander upright (close to 0)
-    - Use x_position and x_velocity to center over the landing pad
-    
-    YOUR CODE HERE
-    """
-    # Strict spin limit to avoid wild oscillations
     LIMIT_SPIN = 0.03
-    
-    # maximum angle (in radians) we allow for horizontal correction
-    MAX_TILT = 0.25 
-    
-    # Tolerance for considering the lander "centered" above the landing pad.
+    MAX_TILT = 0.25
     CENTER_TOLERANCE = 0.05
 
-    #1. Choose whether to focus on vertical control (descending) or horizontal control (aligning).
-    
-    # to check if x is close to 0 (the center of the landing pad)
     is_centered = abs(game.x_position) < CENTER_TOLERANCE
 
     if is_centered:
-        # Landing phase: We're close to the center. Focus on descending safely.
-        # Target vertical velocity depends on height: Faster descent when high, slower when close.
         target_vy = -(game.y_position * 0.5 + 0.1)
     else:
-        # Hover phase: We're far so we still do not descend.
-        # Maintain a near-zero vertical velocity (-0.05) to stay suspended in the air while correcting X.
         target_vy = -0.05
 
-    # 2. Horizontal control: Calculate desired tilt based on position and velocity.
-    
-    # More aggressive formula to seek the center.
     desired_tilt = (game.x_position * 1.0) + (game.x_velocity * 1.5)
-    
-    # Clamp (limit) the desired tilt to avoid extreme angles that could cause crashes.
-    if desired_tilt > MAX_TILT: desired_tilt = MAX_TILT
-    if desired_tilt < -MAX_TILT: desired_tilt = -MAX_TILT
-    
-    # If we're very close to the ground (<0.3) and not centered, limit the tilt to avoid crashing one leg before the other
+
+    if desired_tilt > MAX_TILT:
+        desired_tilt = MAX_TILT
+    if desired_tilt < -MAX_TILT:
+        desired_tilt = -MAX_TILT
+
     if game.y_position < 0.3 and not is_centered:
-        if desired_tilt > 0.1: desired_tilt = 0.1
-        if desired_tilt < -0.1: desired_tilt = -0.1
+        if desired_tilt > 0.1:
+            desired_tilt = 0.1
+        if desired_tilt < -0.1:
+            desired_tilt = -0.1
 
-
-    # 3. Rotation control
-    
-    # We want the actual angle to match the desired_tilt
     angle_error = desired_tilt - game.angle
-    
-    # We use angular velocity to dampen (avoid shaking)
-    # If we want to increase the angle
+
     if angle_error > 0.02:
-         # If we're already spinning fast in that direction, don't push more
-         if game.angular_velocity < 0.2:
-             return ACTION_LEFT_ENGINE
-             
-    # If we want to decrease the angle
+        if game.angular_velocity < 0.2:
+            return ACTION_LEFT_ENGINE
     elif angle_error < -0.02:
-         # If we're already spinning fast, calm down
-         if game.angular_velocity > -0.2:
-             return ACTION_RIGHT_ENGINE
+        if game.angular_velocity > -0.2:
+            return ACTION_RIGHT_ENGINE
 
-    # If we're spinning too fast out of control, stop everything
-    if game.angular_velocity > LIMIT_SPIN * 2: return ACTION_RIGHT_ENGINE
-    if game.angular_velocity < -LIMIT_SPIN * 2: return ACTION_LEFT_ENGINE
+    if game.angular_velocity > LIMIT_SPIN * 2:
+        return ACTION_RIGHT_ENGINE
+    if game.angular_velocity < -LIMIT_SPIN * 2:
+        return ACTION_LEFT_ENGINE
 
-
-    # 4. Execution: vertical control. We only fire the main engine if we're falling faster than our target_vy and the angle is safe (don't fire if we're too tilted)    
-    
-    # Safety margin: Allow firing with a slight tilt to be able to "hover and move" at the same time
     if game.y_velocity < target_vy:
-        if abs(game.angle) < 0.3: 
+        if abs(game.angle) < 0.3:
             return ACTION_MAIN_ENGINE
 
     return ACTION_NOTHING
+
+
+# ──────────────────────────────────────────────
+# KEYBOARD CONTROL
+# ──────────────────────────────────────────────
+
 def move_keyboard(keys_pressed):
-    """
-    Convert keyboard input to action.
-    
-    Controls:
-    - UP arrow or W: Fire main engine
-    - LEFT arrow or A: Fire left engine
-    - RIGHT arrow or D: Fire right engine
-    - No key: Do nothing
-    
-    Args:
-        keys_pressed: pygame key state from pygame.key.get_pressed()
-    
-    Returns:
-        Action integer (0-3)
-    """
     if keys_pressed[pygame.K_UP] or keys_pressed[pygame.K_w]:
         return ACTION_MAIN_ENGINE
     elif keys_pressed[pygame.K_LEFT] or keys_pressed[pygame.K_a]:
@@ -315,50 +373,53 @@ def move_keyboard(keys_pressed):
     else:
         return ACTION_NOTHING
 
+
+# ──────────────────────────────────────────────
+# MAIN GAME LOOP
+# ──────────────────────────────────────────────
+
 def main():
-    """Main game loop."""
     print("=" * 50)
     print("LUNAR LANDER - Machine Learning (UC3M)")
     print("=" * 50)
     print("\nInitializing environment...")
-    
-    # Initialize pygame for keyboard input
+
     pygame.init()
-    
-    # Create the environment with human rendering and configured gravity
+
     env = gym.make(ENV_NAME, gravity=GRAVITY, render_mode="human")
-    
+
     print(f"Environment: {ENV_NAME}")
     print(f"Gravity: {GRAVITY}")
     print(f"Action Space: {env.action_space}")
     print(f"Observation Space: {env.observation_space}")
-    
+
+    # ── Choose file name based on mode ──
     if USE_AGENT:
+        data_filename = "data_agent"
         print("\nRunning in AGENT mode (move_tutorial_1)")
     else:
+        data_filename = "data_keyboard"
         print("\nRunning in KEYBOARD mode")
         print("Controls (focus on the game window!):")
-        print("  W or UP arrow    -> Fire main engine (slow descent)")
-        print("  A or LEFT arrow  -> Fire left engine (rotate clockwise)")
-        print("  D or RIGHT arrow -> Fire right engine (rotate counter-clockwise)")
+        print("  W or UP arrow    -> Fire main engine")
+        print("  A or LEFT arrow  -> Fire left engine")
+        print("  D or RIGHT arrow -> Fire right engine")
         print("  Q or ESC         -> Quit game")
-    
+
     print("\nGoal: Land safely on the pad between the two flags!")
     print("-" * 50)
-    
-    # Initialize the environment
+
+    # ── Initialize DataWriter ──
+    writer = DataWriter(data_filename)
+
+    # ── Initialize environment ──
     observation, info = env.reset()
     game = GameState(observation)
 
-    # We add to iitialize the csv file to store the data (Question 4)
-    init_arff(ARFF_FILE)
-    
-    # FPS controller
     clock = pygame.time.Clock()
-    
     episode_count = 0
     running = True
-    
+
     try:
         while running:
             # Handle pygame events
@@ -368,36 +429,43 @@ def main():
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE or event.key == pygame.K_q:
                         running = False
-            
+
             if not running:
                 break
-            
-            # Determine action based on USE_AGENT variable
+
+            # Determine action
             if USE_AGENT:
                 action = move_tutorial_1(game)
             else:
                 keys_pressed = pygame.key.get_pressed()
                 action = move_keyboard(keys_pressed)
-            
-            # Store action in game state
+
+            # Store action in game state BEFORE stepping
             game.action = action
-            
-            # Execute action
+
+            # ── Buffer current state + action ──
+            print_line_data(game, writer)
+
+            # Execute action in environment
             observation, reward, terminated, truncated, info = env.step(action)
-            
+
+            # ── Flush previous buffer with this step's reward ──
+            writer.flush_with_reward(reward)
+
             # Update game state
             game.update(observation, reward)
-            
-            # Print state
+
+            # Print state to terminal
             print_state(game)
 
-            # We add this for Question 4
-            line = print_line_data(game)
-            append_line_to_arff(ARFF_FILE, line)
-            
             # Check if episode ended
             if terminated or truncated:
                 episode_count += 1
+
+                # Discard any dangling buffer (the episode ended,
+                # so there is no "next reward" for the last state)
+                writer.discard_buffer()
+
                 if terminated:
                     if game.score > 0:
                         print(f"\n*** EPISODE {episode_count} COMPLETE! Final Score: {game.score:.2f} ***")
@@ -408,28 +476,25 @@ def main():
                     else:
                         print(f"\n*** CRASH! Episode {episode_count} Final Score: {game.score:.2f} ***\n")
                 else:
-                    print(f"\n*** Episode {episode_count} truncated. Final Score: {game.score:.2f} ***\n")
-                
+                    print(f"\n*** Episode {episode_count} truncated. Score: {game.score:.2f} ***\n")
+
                 # Reset environment
                 time.sleep(1)
                 observation, info = env.reset()
                 game.reset(observation)
-
-                # We add this to track every episodes number
-                game.episode = episode_count
-
                 print("New episode started!\n")
-            
-            # Control frame rate
+
             clock.tick(30)
-            
+
     except KeyboardInterrupt:
         print("\n\nGame interrupted by user.")
     finally:
+        writer.close()
         env.close()
         pygame.quit()
         print(f"\nGame ended. Total episodes: {episode_count}")
         print("Thank you for playing!")
+
 
 if __name__ == "__main__":
     main()
