@@ -23,7 +23,7 @@ import pygame
 GRAVITY = -1.62
 
 # Agent mode: True = rule-based agent, False = keyboard control
-USE_AGENT = False
+USE_AGENT = True
 
 # Environment configuration
 ENV_NAME = "LunarLander-v3"
