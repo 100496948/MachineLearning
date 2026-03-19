@@ -17,6 +17,7 @@ ENGINEERED = [
     'x_pos_x_x_vel',
     'y_pos_x_y_vel',
     'low_alt_high_speed',
+    'next_reward',
 ]
 
 
@@ -121,13 +122,13 @@ def process_file(path: Path) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Remove engineered feature columns from CSV files')
+    parser = argparse.ArgumentParser(description='Remove engineered feature columns from CSV and ARFF files')
     parser.add_argument('files', nargs='*', help='CSV files to process (default: all .csv in script dir)')
     args = parser.parse_args()
 
     base_dir = Path(__file__).parent
     if not args.files:
-        files = list(base_dir.glob('*.csv'))
+        files = list(base_dir.glob('*.csv')) + list(base_dir.glob('*.arff'))
     else:
         files = [Path(f) for f in args.files]
 
