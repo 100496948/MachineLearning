@@ -1,4 +1,4 @@
-@RELATION lunarlander
+@RELATION raw_data_keyboard
 
 @ATTRIBUTE x_position NUMERIC
 @ATTRIBUTE y_position NUMERIC
