@@ -1,17 +1,4 @@
-@RELATION raw_data_keyboard
-
-@ATTRIBUTE x_position NUMERIC
-@ATTRIBUTE y_position NUMERIC
-@ATTRIBUTE x_velocity NUMERIC
-@ATTRIBUTE y_velocity NUMERIC
-@ATTRIBUTE angle NUMERIC
-@ATTRIBUTE angular_velocity NUMERIC
-@ATTRIBUTE left_leg_contact NUMERIC
-@ATTRIBUTE right_leg_contact NUMERIC
-@ATTRIBUTE action {0,1,2,3}
-@ATTRIBUTE next_reward NUMERIC
-
-@DATA
+x_position,y_position,x_velocity,y_velocity,angle,angular_velocity,left_leg_contact,right_leg_contact,action,next_reward
 0.0062045096,1.3994888,0.62843794,-0.50806403,-0.0071827257,-0.14235057,0.0,0.0,0,0.301970
 0.01240921,1.3879846,0.6275891,-0.51134497,-0.014217018,-0.14069918,0.0,0.0,0,0.172032
 0.018614197,1.3763832,0.627611,-0.5157095,-0.021246905,-0.14061108,0.0,0.0,0,0.179824
