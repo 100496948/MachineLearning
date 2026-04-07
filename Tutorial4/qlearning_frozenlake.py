@@ -9,7 +9,7 @@ def main():
     # --- CONFIGURATION ---
     # ==========================================
     # MODE can be "TRAIN" or "PLAY"
-    MODE = "TRAIN" 
+    MODE = "PLAY" 
     
     # RENDER_TRAINING: Set to True to watch the agent learn (Very slow!)
     # Only applies if MODE is "TRAIN".
@@ -80,7 +80,7 @@ def main():
                 # Q(s,a) = Q(s,a) + learning_rate * [Reward + discount_rate * max(Q(s',a')) - Q(s,a)]
                 # Currently, the agent learns nothing! Fix the line below.
                 
-                qtable[state, action] = qtable[state, action] # <--- FIX THIS LINE
+                qtable[state, action] = qtable[state, action] + learning_rate * (reward + discount_rate * np.max(qtable[new_state, :]) - qtable[state, action])
                 
                 # Transition to next state
                 state = new_state
@@ -97,7 +97,7 @@ def main():
             # and starts exploiting its learned policy. 
             # Tip: Use exponential decay -> min_epsilon + (max - min) * exp(-decay * episode)
             
-            epsilon = epsilon # <--- FIX THIS LINE
+            epsilon = min_epsilon + (max_epsilon - min_epsilon) * np.exp(-decay_rate * episode)
             
             rewards_all_episodes.append(rewards_current_episode)
             
