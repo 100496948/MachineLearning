@@ -9,13 +9,13 @@ def main():
     # --- CONFIGURATION ---
     # ==========================================
     # MODE can be "TRAIN" or "PLAY"
-    MODE = "PLAY" 
+    MODE = "TRAIN" 
     
     # RENDER_TRAINING: Set to True to watch the agent learn (Very slow!)
     # Only applies if MODE is "TRAIN".
     RENDER_TRAINING = False  
-    IS_SLIPPERY = False
-    QTABLE_FILE = "qtable.txt"
+    IS_SLIPPERY = True
+    QTABLE_FILE = "qtable2.txt"
     
     # 1. Environment Initialization
     if MODE == "PLAY" or RENDER_TRAINING:
@@ -43,7 +43,7 @@ def main():
     #               TRAINING MODE
     # ==========================================
     if MODE == "TRAIN":
-        episodes = 2000
+        episodes = 10000
         learning_rate = 0.8
         discount_rate = 0.95
         
@@ -115,7 +115,7 @@ def main():
         plt.xlabel("Episode")
         plt.ylabel("Average Reward")
         plt.grid(True)
-        plt.show()
+        plt.savefig("Figure_2_exer2.png")
 
     # ==========================================
     #                 PLAY MODE
