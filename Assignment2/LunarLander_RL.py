@@ -47,7 +47,7 @@ STATE_MODE = "MANUAL"
 
 # If True, use the custom reward from compute_reward()
 # If False, use the raw reward from Gymnasium
-USE_CUSTOM_REWARD = True
+USE_CUSTOM_REWARD = False
 
 # If True, render the environment during training (very slow)
 RENDER_TRAINING = False
@@ -184,34 +184,6 @@ def get_manual_state_space():
     return (N_X_POS * N_Y_POS * N_X_VEL * N_Y_VEL
             * N_ANGLE * N_ANG_VEL * N_LEFT * N_RIGHT)
 
-<<<<<<< HEAD
-    The total number of states is the product of all these values.
-
-    This value determines the number of rows in the Q-table.
-    """
-    # Bins per variable:
-    # x_position:       5 bins  (horizontal displacement from center)
-    # y_position:       5 bins  (altitude above ground)
-    # x_velocity:       3 bins  (left / near-zero / right)
-    # y_velocity:       3 bins  (falling fast / slow / rising)
-    # angle:            5 bins  (tilt of the lander)
-    # angular_velocity: 3 bins  (rotation speed)
-    # left_leg_contact: 2 bins  (boolean)
-    # right_leg_contact:2 bins  (boolean)
-    #
-    # Total = 5 * 5 * 3 * 3 * 5 * 3 * 2 * 2 = 13500
-    n_x_pos   = 5
-    n_y_pos   = 5
-    n_x_vel   = 3
-    n_y_vel   = 3
-    n_angle   = 5
-    n_ang_vel = 3
-    n_left    = 2
-    n_right   = 2
-
-    return n_x_pos * n_y_pos * n_x_vel * n_y_vel * n_angle * n_ang_vel * n_left * n_right
-=======
->>>>>>> db58c7a9a0bbcca26bc706a9d84aabb048008293
 
 def manual_state_id(game):
     """
@@ -241,56 +213,6 @@ def manual_state_id(game):
     i_a   = int(np.digitize(game.angle,            BINS_ANGLE))
     i_va  = int(np.digitize(game.angular_velocity, BINS_ANG_VEL))
 
-<<<<<<< HEAD
-    # --------------------------------------------------
-    # 1. DISCRETIZE EACH VARIABLE
-    # --------------------------------------------------
-
-    # x_position: range roughly [-1, 1] in LunarLander
-    # 5 bins: far-left, left, center, right, far-right
-    x_bins = np.array([-0.5, -0.15, 0.15, 0.5])
-    x_pos_d = int(np.digitize(game.x_position, x_bins))  # 0..4
-
-    # y_position: range [0, 1.5+], 0 = ground
-    # 5 bins: on-ground, very-low, low, mid, high
-    y_bins = np.array([0.05, 0.2, 0.4, 0.7])
-    y_pos_d = int(np.digitize(game.y_position, y_bins))  # 0..4
-
-    # x_velocity: 3 bins: moving left / near-still / moving right
-    vx_bins = np.array([-0.2, 0.2])
-    x_vel_d = int(np.digitize(game.x_velocity, vx_bins))  # 0..2
-
-    # y_velocity: 3 bins: falling fast / moderate / slow-or-rising
-    vy_bins = np.array([-0.3, -0.05])
-    y_vel_d = int(np.digitize(game.y_velocity, vy_bins))  # 0..2
-
-    # angle: 5 bins: hard-left, left, upright, right, hard-right
-    a_bins = np.array([-0.4, -0.1, 0.1, 0.4])
-    angle_d = int(np.digitize(game.angle, a_bins))  # 0..4
-
-    # angular velocity: 3 bins: spinning-left / stable / spinning-right
-    av_bins = np.array([-0.2, 0.2])
-    ang_vel_d = int(np.digitize(game.angular_velocity, av_bins))  # 0..2
-
-    # leg contacts: boolean -> 0 or 1
-    left_d  = int(game.left_leg_contact  > 0.5)  # 0 or 1
-    right_d = int(game.right_leg_contact > 0.5)  # 0 or 1
-
-    # --------------------------------------------------
-    # 2. MIXED-RADIX ENCODING
-    # --------------------------------------------------
-    # Sizes:  5,  5,  3,  3,  5,  3,  2,  2
-    # Must match the order and sizes in get_manual_state_space()
-    dims = [5, 5, 3, 3, 5, 3, 2, 2]
-    vals = [x_pos_d, y_pos_d, x_vel_d, y_vel_d, angle_d, ang_vel_d, left_d, right_d]
-
-    state_id = 0
-    multiplier = 1
-    for v, d in zip(reversed(vals), reversed(dims)):
-        v = min(v, d - 1)  # clamp to valid range
-        state_id += v * multiplier
-        multiplier *= d
-=======
     # Legs are already binary (0.0 or 1.0)
     i_l = int(game.left_leg_contact)
     i_r = int(game.right_leg_contact)
@@ -304,7 +226,6 @@ def manual_state_id(game):
     state_id += i_va * N_X_POS * N_Y_POS * N_X_VEL * N_Y_VEL * N_ANGLE
     state_id += i_l  * N_X_POS * N_Y_POS * N_X_VEL * N_Y_VEL * N_ANGLE * N_ANG_VEL
     state_id += i_r  * N_X_POS * N_Y_POS * N_X_VEL * N_Y_VEL * N_ANGLE * N_ANG_VEL * N_LEFT
->>>>>>> db58c7a9a0bbcca26bc706a9d84aabb048008293
 
     return int(state_id)
 
@@ -342,33 +263,6 @@ def compute_reward(observation, raw_reward, terminated, truncated):
     # Start from the original Gymnasium reward
     reward = raw_reward
 
-<<<<<<< HEAD
-    # --- Penalty: horizontal distance from center (landing pad is at x=0) ---
-    # The farther away, the harder it is to land safely.
-    reward -= 0.3 * abs(x_position)
-
-    # --- Penalty: high vertical speed (hard landings) ---
-    # A large negative y_velocity means the lander is dropping fast.
-    reward -= 0.2 * abs(y_velocity)
-
-    # --- Penalty: large tilt angle (instability) ---
-    # An angled lander is harder to control and more likely to crash.
-    reward -= 0.3 * abs(angle)
-
-    # --- Penalty: large angular velocity (spinning) ---
-    reward -= 0.1 * abs(angular_velocity)
-
-    # --- Reward: leg contact (stable, controlled touchdown) ---
-    if left_leg:
-        reward += 2.0
-    if right_leg:
-        reward += 2.0
-
-    # --- Reward: being close to center at low altitude (approach bonus) ---
-    # Encourages the agent to align over the pad before descending.
-    if y_position < 0.3:
-        reward += max(0.0, 0.5 - abs(x_position) * 2.0)
-=======
     # --- Shaping terms (small coefficients) ---
 
     # Penalize horizontal distance from the landing zone (x = 0)
@@ -385,7 +279,6 @@ def compute_reward(observation, raw_reward, terminated, truncated):
 
     # Reward leg contact (encourages landing rather than hovering)
     reward += 0.10 * (left_leg + right_leg)
->>>>>>> db58c7a9a0bbcca26bc706a9d84aabb048008293
 
     return reward
 
@@ -440,30 +333,10 @@ def update_qtable(qtable, state_id, action, reward, next_state_id,
     - learning_rate: alpha
     - discount_rate: gamma
     """
-<<<<<<< HEAD
-
-    # ===========================================================
-    # TODO: IMPLEMENT THE Q-LEARNING UPDATE FORMULA
-    # ===========================================================
-    # Replace the line below with the Bellman update.
-    # The agent must learn from:
-    # - current state
-    # - chosen action
-    # - received reward
-    # - next state
-    #
-    # Tip:
-    # np.max(qtable[next_state_id, :])
-    
-    qtable[state_id, action] = qtable[state_id, action] + learning_rate * (
-        reward + discount_rate * np.max(qtable[next_state_id, :]) - qtable[state_id, action]
-    )
-=======
     best_next_q = np.max(qtable[next_state_id, :])
     td_target   = reward + discount_rate * best_next_q
     td_error    = td_target - qtable[state_id, action]
     qtable[state_id, action] = qtable[state_id, action] + learning_rate * td_error
->>>>>>> db58c7a9a0bbcca26bc706a9d84aabb048008293
 
 
 def decay_epsilon(episode, max_epsilon, min_epsilon, decay_rate):
@@ -488,18 +361,6 @@ def decay_epsilon(episode, max_epsilon, min_epsilon, decay_rate):
 
 
 
-<<<<<<< HEAD
-    # ===========================================================
-    # TODO: IMPLEMENT EPSILON DECAY
-    # ===========================================================
-    # Replace the line below with the exponential decay formula.
-    
-    return min_epsilon + (max_epsilon - min_epsilon) * np.exp(-decay_rate * episode)
-    
-    
- 
-=======
->>>>>>> db58c7a9a0bbcca26bc706a9d84aabb048008293
 # ==========================================
 # PHASE 2 - VQQL DISCRETIZATION
 # ==========================================
