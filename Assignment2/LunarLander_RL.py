@@ -47,7 +47,7 @@ STATE_MODE = "MANUAL"
 
 # If True, use the custom reward from compute_reward()
 # If False, use the raw reward from Gymnasium
-USE_CUSTOM_REWARD = False
+USE_CUSTOM_REWARD = True
 
 # If True, render the environment during training (very slow)
 RENDER_TRAINING = False
