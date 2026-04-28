@@ -77,6 +77,41 @@ ACTION_MAIN_ENGINE = 2
 ACTION_RIGHT_ENGINE = 3
 
 
+# ==========================================
+# MANUAL DISCRETIZATION CONFIGURATION
+# ==========================================
+# Bin edges for each continuous variable.
+# np.digitize(value, edges) returns an integer in [0, len(edges)],
+# so the number of bins per variable is len(edges) + 1.
+#
+# Design rationale:
+# - x_position: 5 bins, narrow band around 0 (landing zone is centered at x=0)
+# - y_position: 5 bins, more resolution near the ground where decisions matter most
+# - x_velocity: 3 bins (moving left / ~still / moving right)
+# - y_velocity: 3 bins (falling fast / normal descent / ascending or hovering)
+# - angle: 3 bins (tilted left / upright / tilted right) - tight around 0
+# - angular_velocity: 3 bins (rotating left / stable / rotating right)
+# - left_leg, right_leg: 2 bins each (boolean: contact or no contact)
+
+BINS_X_POS    = [-0.5, -0.1, 0.1, 0.5]   # -> 5 bins
+BINS_Y_POS    = [0.1, 0.4, 0.8, 1.2]     # -> 5 bins
+BINS_X_VEL    = [-0.2, 0.2]              # -> 3 bins
+BINS_Y_VEL    = [-0.4, -0.1]             # -> 3 bins
+BINS_ANGLE    = [-0.2, 0.2]              # -> 3 bins
+BINS_ANG_VEL  = [-0.3, 0.3]              # -> 3 bins
+
+N_X_POS   = len(BINS_X_POS)   + 1   # 5
+N_Y_POS   = len(BINS_Y_POS)   + 1   # 5
+N_X_VEL   = len(BINS_X_VEL)   + 1   # 3
+N_Y_VEL   = len(BINS_Y_VEL)   + 1   # 3
+N_ANGLE   = len(BINS_ANGLE)   + 1   # 3
+N_ANG_VEL = len(BINS_ANG_VEL) + 1   # 3
+N_LEFT    = 2
+N_RIGHT   = 2
+
+# Total: 5 * 5 * 3 * 3 * 3 * 3 * 2 * 2 = 8100 states
+
+
 # GAME STATE CLASS
 class GameState:
     def __init__(self, observation):
@@ -133,24 +168,23 @@ class GameState:
 # ==========================================
 # PHASE 1 STEP 1 - MANUAL DISCRETIZATION
 # ==========================================
-        
+
 def get_manual_state_space():
     """
-    TODO (Phase 1 - Step 1):
-
     Return the total number of discrete states.
 
-    You must compute the size of the state space based on the number of bins
-    defined for each variable.
+    The total number of states is the product of the number of bins
+    of each discretized variable. This determines the number of rows
+    in the Q-table.
 
-    For example:
-    - x_position: 5 bins
-    - y_position: 5 bins
-    - velocities: 3 bins each
-    - angle: 3 bins
-    - angular velocity: 3 bins
-    - leg contact: 3 bins
+    With the chosen bin configuration:
+        5 (x_pos) * 5 (y_pos) * 3 (x_vel) * 3 (y_vel)
+        * 3 (angle) * 3 (ang_vel) * 2 (left_leg) * 2 (right_leg) = 8100
+    """
+    return (N_X_POS * N_Y_POS * N_X_VEL * N_Y_VEL
+            * N_ANGLE * N_ANG_VEL * N_LEFT * N_RIGHT)
 
+<<<<<<< HEAD
     The total number of states is the product of all these values.
 
     This value determines the number of rows in the Q-table.
@@ -176,28 +210,38 @@ def get_manual_state_space():
     n_right   = 2
 
     return n_x_pos * n_y_pos * n_x_vel * n_y_vel * n_angle * n_ang_vel * n_left * n_right
+=======
+>>>>>>> db58c7a9a0bbcca26bc706a9d84aabb048008293
 
 def manual_state_id(game):
     """
-    TODO (Phase 1 - Step 1):
-
     Convert the continuous state of the environment into a unique discrete state ID.
 
     Steps:
-    1. Discretize each variable (position, velocity, angle, etc.).
-    2. Combine all discrete values into a single integer index.
+    1. Discretize each variable using np.digitize and the bin edges.
+    2. Combine all discrete values into a single integer using mixed-radix encoding.
 
-    You should use a mixed-radix encoding:
-    - Each variable contributes to the final index.
-    - The order of combination must be consistent.
+    Mixed-radix encoding guarantees that:
+    - Each combination of bin indices maps to a UNIQUE integer.
+    - The resulting state_id lies in [0, get_manual_state_space() - 1].
 
-    IMPORTANT:
-    The resulting state_id must be an integer in the range:
-    [0, total_number_of_states - 1]
-
-    This ID will be used as the row index in the Q-table.
+    The formula is:
+        state_id = i_0
+                 + i_1 * N_0
+                 + i_2 * N_0 * N_1
+                 + i_3 * N_0 * N_1 * N_2
+                 + ...
+    where i_k is the bin index of variable k and N_k is the number of bins.
     """
+    # Discretize each continuous variable
+    i_x   = int(np.digitize(game.x_position,       BINS_X_POS))
+    i_y   = int(np.digitize(game.y_position,       BINS_Y_POS))
+    i_vx  = int(np.digitize(game.x_velocity,       BINS_X_VEL))
+    i_vy  = int(np.digitize(game.y_velocity,       BINS_Y_VEL))
+    i_a   = int(np.digitize(game.angle,            BINS_ANGLE))
+    i_va  = int(np.digitize(game.angular_velocity, BINS_ANG_VEL))
 
+<<<<<<< HEAD
     # --------------------------------------------------
     # 1. DISCRETIZE EACH VARIABLE
     # --------------------------------------------------
@@ -246,6 +290,21 @@ def manual_state_id(game):
         v = min(v, d - 1)  # clamp to valid range
         state_id += v * multiplier
         multiplier *= d
+=======
+    # Legs are already binary (0.0 or 1.0)
+    i_l = int(game.left_leg_contact)
+    i_r = int(game.right_leg_contact)
+
+    # Mixed-radix encoding to combine all indices into a single state ID
+    state_id  = i_x
+    state_id += i_y  * N_X_POS
+    state_id += i_vx * N_X_POS * N_Y_POS
+    state_id += i_vy * N_X_POS * N_Y_POS * N_X_VEL
+    state_id += i_a  * N_X_POS * N_Y_POS * N_X_VEL * N_Y_VEL
+    state_id += i_va * N_X_POS * N_Y_POS * N_X_VEL * N_Y_VEL * N_ANGLE
+    state_id += i_l  * N_X_POS * N_Y_POS * N_X_VEL * N_Y_VEL * N_ANGLE * N_ANG_VEL
+    state_id += i_r  * N_X_POS * N_Y_POS * N_X_VEL * N_Y_VEL * N_ANGLE * N_ANG_VEL * N_LEFT
+>>>>>>> db58c7a9a0bbcca26bc706a9d84aabb048008293
 
     return int(state_id)
 
@@ -255,15 +314,22 @@ def manual_state_id(game):
 
 def compute_reward(observation, raw_reward, terminated, truncated):
     """
-    TODO:
-    Compute a custom reward based on the environment reward
+    Compute a custom (shaped) reward based on the environment reward
     and additional shaping terms.
 
-    observation format:
-    [x_position, y_position, x_velocity, y_velocity,
-     angle, angular_velocity, left_leg, right_leg]
-    """
+    Strategy:
+    - Keep the original Gymnasium reward as the main signal.
+    - Add small penalty terms that push the agent toward desirable behavior:
+        * being centered horizontally (close to x = 0)
+        * descending slowly (small |y_velocity|)
+        * staying upright (small |angle|)
+        * not spinning (small |angular_velocity|)
+    - Add a small bonus when a leg is in contact with the ground (encourages
+      the agent to actually land instead of hovering).
 
+    The shaping coefficients are kept small so they do not overwhelm the
+    original reward, which is critical for learning a successful landing.
+    """
     x_position = observation[0]
     y_position = observation[1]
     x_velocity = observation[2]
@@ -276,6 +342,7 @@ def compute_reward(observation, raw_reward, terminated, truncated):
     # Start from the original Gymnasium reward
     reward = raw_reward
 
+<<<<<<< HEAD
     # --- Penalty: horizontal distance from center (landing pad is at x=0) ---
     # The farther away, the harder it is to land safely.
     reward -= 0.3 * abs(x_position)
@@ -301,9 +368,27 @@ def compute_reward(observation, raw_reward, terminated, truncated):
     # Encourages the agent to align over the pad before descending.
     if y_position < 0.3:
         reward += max(0.0, 0.5 - abs(x_position) * 2.0)
+=======
+    # --- Shaping terms (small coefficients) ---
+
+    # Penalize horizontal distance from the landing zone (x = 0)
+    reward -= 0.10 * abs(x_position)
+
+    # Penalize fast descent (y_velocity is negative when falling)
+    reward -= 0.10 * abs(y_velocity)
+
+    # Penalize tilt (we want the lander upright)
+    reward -= 0.20 * abs(angle)
+
+    # Penalize spinning
+    reward -= 0.05 * abs(angular_velocity)
+
+    # Reward leg contact (encourages landing rather than hovering)
+    reward += 0.10 * (left_leg + right_leg)
+>>>>>>> db58c7a9a0bbcca26bc706a9d84aabb048008293
 
     return reward
-   
+
 # ==========================================
 # PHASE 1 STEP 3 - Q LEARNING
 # ==========================================
@@ -326,7 +411,7 @@ def choose_action(state_id, qtable, epsilon, env):
     Returns:
     - action: integer in the action space
     """
-    
+
     if np.random.uniform(0, 1) > epsilon:
         return int(np.argmax(qtable[state_id, :]))  # exploit
     return env.action_space.sample()                # explore
@@ -338,10 +423,16 @@ def update_qtable(qtable, state_id, action, reward, next_state_id,
     Apply the Q-learning Bellman update.
 
     Bellman equation:
-    Q(s,a) = Q(s,a) + alpha * [reward + gamma * max(Q(s',a')) - Q(s,a)]
+        Q(s,a) <- Q(s,a) + alpha * [reward + gamma * max_a' Q(s',a') - Q(s,a)]
+
+    The term in brackets is the "TD error":
+    - (reward + gamma * max Q(s',.))  is the new estimate of Q(s,a)
+      built from the immediate reward plus the best possible future value.
+    - Q(s,a) is the previous estimate.
+    - The agent moves its current Q value a fraction (alpha) toward the new estimate.
 
     Parameters:
-    - qtable: Q-value table
+    - qtable: Q-value table (modified in place)
     - state_id: current discrete state s
     - action: action a taken in state s
     - reward: reward received after taking action a
@@ -349,6 +440,7 @@ def update_qtable(qtable, state_id, action, reward, next_state_id,
     - learning_rate: alpha
     - discount_rate: gamma
     """
+<<<<<<< HEAD
 
     # ===========================================================
     # TODO: IMPLEMENT THE Q-LEARNING UPDATE FORMULA
@@ -366,28 +458,37 @@ def update_qtable(qtable, state_id, action, reward, next_state_id,
     qtable[state_id, action] = qtable[state_id, action] + learning_rate * (
         reward + discount_rate * np.max(qtable[next_state_id, :]) - qtable[state_id, action]
     )
+=======
+    best_next_q = np.max(qtable[next_state_id, :])
+    td_target   = reward + discount_rate * best_next_q
+    td_error    = td_target - qtable[state_id, action]
+    qtable[state_id, action] = qtable[state_id, action] + learning_rate * td_error
+>>>>>>> db58c7a9a0bbcca26bc706a9d84aabb048008293
 
 
 def decay_epsilon(episode, max_epsilon, min_epsilon, decay_rate):
     """
-    Compute epsilon decay over time.
+    Compute exponential epsilon decay over time.
 
-    The exploration rate should decrease as training progresses,
-    so the agent gradually shifts from exploration to exploitation.
+    The exploration rate decreases as training progresses, so the agent
+    gradually shifts from exploration to exploitation:
 
-    A common exponential decay formula is:
-    epsilon = min_epsilon + (max_epsilon - min_epsilon) * exp(-decay_rate * episode)
+        epsilon = min_epsilon + (max_epsilon - min_epsilon) * exp(-decay_rate * episode)
 
     Parameters:
     - episode: current episode index
-    - max_epsilon: initial epsilon
-    - min_epsilon: minimum epsilon value
-    - decay_rate: decay speed
+    - max_epsilon: initial epsilon (high exploration)
+    - min_epsilon: minimum epsilon value (always keep some exploration)
+    - decay_rate: decay speed (higher -> faster decay)
 
     Returns:
     - epsilon value for the current episode
     """
+    return min_epsilon + (max_epsilon - min_epsilon) * np.exp(-decay_rate * episode)
 
+
+
+<<<<<<< HEAD
     # ===========================================================
     # TODO: IMPLEMENT EPSILON DECAY
     # ===========================================================
@@ -397,6 +498,8 @@ def decay_epsilon(episode, max_epsilon, min_epsilon, decay_rate):
     
     
  
+=======
+>>>>>>> db58c7a9a0bbcca26bc706a9d84aabb048008293
 # ==========================================
 # PHASE 2 - VQQL DISCRETIZATION
 # ==========================================
@@ -470,8 +573,8 @@ def discretize_state(game, scaler, quantizer, state_columns):
     state_id = quantizer.predict(scaled_features)[0]
 
     return int(state_id)
-    
-    
+
+
 def get_state_id(game, scaler=None, quantizer=None, state_columns=None):
     """
     Return the discrete state identifier used as row index in the Q-table.
@@ -482,8 +585,8 @@ def get_state_id(game, scaler=None, quantizer=None, state_columns=None):
         return manual_state_id(game)
     else:
         raise ValueError("STATE_MODE must be 'VQQL' or 'MANUAL'")
-        
- 
+
+
 # ==========================================
 # PLOTTING
 # ==========================================
@@ -504,7 +607,7 @@ def plot_training_curve(rewards_all_episodes, window=100, title=None):
     plt.ylabel("Average Reward")
     plt.grid(True)
     plt.show()
-    
+
 # ==========================================
 # QUIT GAME
 # ==========================================
@@ -604,14 +707,14 @@ def main():
             rewards_current_episode = 0.0
 
             while not (terminated or truncated):
-                
+
                 # Check for exit events
                 if handle_pygame_events():
                     print("Exiting...")
                     env.close()
                     pygame.quit()
                     return
-        
+
                 # Current discrete state
                 state_id = get_state_id(game, scaler, quantizer, state_columns)
 
@@ -709,14 +812,14 @@ def main():
             print(f"\n--- Playing Episode {ep + 1} ---")
 
             while not (terminated or truncated):
-            
+
                 # Check for exit events
                 if handle_pygame_events():
                     print("Exiting...")
                     env.close()
                     pygame.quit()
                     return
-                    
+
                 state_id = get_state_id(game, scaler, quantizer, state_columns)
 
                 # Always exploit
