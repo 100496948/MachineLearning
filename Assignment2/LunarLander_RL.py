@@ -54,13 +54,13 @@ RENDER_TRAINING = False
 
 # Training parameters
 EPISODES = 5000
-LEARNING_RATE = 0.2
+LEARNING_RATE = 0.1
 DISCOUNT_RATE = 0.95
 
 # Exploration parameters
 MAX_EPSILON = 1.0
 MIN_EPSILON = 0.05
-DECAY_RATE = 0.002
+DECAY_RATE = 0.001
 
 # ACTION_REPEAT reduces the frequency of decision-making by repeating
 # the same action for multiple environment steps.
