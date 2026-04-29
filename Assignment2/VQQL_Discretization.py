@@ -28,7 +28,7 @@ KEYBOARD_CSV = "keyboard_data.csv"
 AGENT_CSV    = "agent_data.csv"
 
 # Output file where the vector quantizer will be stored
-OUTPUT_FILE = "lunarlander_vq.pkl"
+OUTPUT_FILE = "lunarlander_vq_64.pkl"
 
 # Columns that represent the STATE of the environment
 # IMPORTANT: Do NOT include the action column here. It must match exactly
@@ -46,7 +46,7 @@ STATE_COLUMNS = [
 
 # Number of clusters (i.e., number of discrete states).
 # Try 32, 64, 128, 256 to study the effect of granularity.
-N_CLUSTERS = 256
+N_CLUSTERS = 64
 
 # Number of samples to use from EACH dataset (keyboard and agent)
 SAMPLES_PER_SOURCE = 25000

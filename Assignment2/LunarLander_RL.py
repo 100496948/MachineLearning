@@ -35,10 +35,10 @@ GRAVITY = -1.62
 
 ENV_NAME = "LunarLander-v3"
 QUANTIZER_FILE = "lunarlander_vq.pkl"
-QTABLE_FILE = "qtable.txt"
+QTABLE_FILE = "qtable_phase1_best.txt"
 
 # MODE can be: "TRAIN", "PLAY"
-MODE = "TRAIN"
+MODE = "PLAY"
 
 # State representation mode:
 # "VQQL" -> use the quantizer
