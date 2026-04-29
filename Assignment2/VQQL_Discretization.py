@@ -3,10 +3,9 @@ VQQL Discretization
 January 2026 - Machine Learning Classes
 University Carlos III of Madrid
 
-This version integrates:
-- Phase 1: manual discretization + reward + Q-learning + tuning
-- Phase 2: VQQL + experiments with number of clusters + training/evaluation
-- Phase 3: comparison of Q-learning models + comparison with Tutorial 1 and Assignment 1
+Modified version that loads TWO CSV files (keyboard + agent) and mixes them
+into a single training dataset for the vector quantizer, as suggested by
+the original assignment design.
 """
 
 import pandas as pd
@@ -14,6 +13,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import MiniBatchKMeans
 import joblib
+import os
 
 # =========================================================
 # PHASE 1: State Representation with Vector Quantization
@@ -23,14 +23,16 @@ import joblib
 # CONFIGURATION PARAMETERS
 # ==========================================
 
-# Input CSV file
-AGENT_CSV = "training_data.csv"
+# Input CSV files
+KEYBOARD_CSV = "keyboard_data.csv"
+AGENT_CSV    = "agent_data.csv"
 
 # Output file where the vector quantizer will be stored
 OUTPUT_FILE = "lunarlander_vq.pkl"
 
 # Columns that represent the STATE of the environment
-# IMPORTANT: Do NOT include the action column here
+# IMPORTANT: Do NOT include the action column here. It must match exactly
+# the order used in extract_features() in LunarLander_RL.py.
 STATE_COLUMNS = [
     "x_position",
     "y_position",
@@ -42,11 +44,11 @@ STATE_COLUMNS = [
     "right_leg"
 ]
 
-# Number of clusters (i.e., number of discrete states)
+# Number of clusters (i.e., number of discrete states).
+# Try 32, 64, 128, 256 to study the effect of granularity.
 N_CLUSTERS = 256
 
-# Number of samples to use from each dataset
-# (keyboard and agent)
+# Number of samples to use from EACH dataset (keyboard and agent)
 SAMPLES_PER_SOURCE = 25000
 
 
@@ -54,33 +56,45 @@ SAMPLES_PER_SOURCE = 25000
 # LOAD AND PREPARE DATA
 # ==========================================
 
-def load_and_mix_states(agent_csv, state_columns, samples_per_source):
+def load_and_mix_states(keyboard_csv, agent_csv, state_columns, samples_per_source):
     """
-    Load state data from CSV file (keyboard and agent),
+    Load state data from one or two CSV files (keyboard and agent),
     select relevant columns, and mix them into a single dataset.
+
+    If one of the files is missing, the other is used alone (with a warning).
     """
+    frames = []
 
-    # Load CSV files into pandas DataFrames
-    df_agent = pd.read_csv(agent_csv)
+    if os.path.exists(keyboard_csv):
+        df_kb = pd.read_csv(keyboard_csv)[state_columns].dropna()
+        n_kb = min(samples_per_source, len(df_kb))
+        df_kb = df_kb.sample(n=n_kb, random_state=42)
+        print(f"  Keyboard data: {len(df_kb)} rows (from {keyboard_csv})")
+        frames.append(df_kb)
+    else:
+        print(f"  WARNING: '{keyboard_csv}' not found. Skipping keyboard data.")
 
-    # Keep only the state columns and remove any missing values
-    # (this automatically ignores columns like "action")
-    df_agent = df_agent[state_columns].dropna()
+    if os.path.exists(agent_csv):
+        df_ag = pd.read_csv(agent_csv)[state_columns].dropna()
+        n_ag = min(samples_per_source, len(df_ag))
+        df_ag = df_ag.sample(n=n_ag, random_state=42)
+        print(f"  Agent data:    {len(df_ag)} rows (from {agent_csv})")
+        frames.append(df_ag)
+    else:
+        print(f"  WARNING: '{agent_csv}' not found. Skipping agent data.")
 
-    # Determine how many samples we can take from each dataset
-    # (we cannot take more than what exists)
-    n_a = min(samples_per_source, len(df_agent))
+    if not frames:
+        raise FileNotFoundError(
+            "No CSV input file found. At least one of "
+            f"'{keyboard_csv}' or '{agent_csv}' must exist."
+        )
 
-    # Randomly sample from each dataset
-    # This ensures contribute equally
-    df_agent = df_agent.sample(n=n_a, random_state=42)
+    # Concatenate and shuffle so data is well mixed
+    df = pd.concat(frames, ignore_index=True)
+    df = df.sample(frac=1.0, random_state=42).reset_index(drop=True)
 
-    # Shuffle the dataset
-    # (so data is well mixed)
-    df_agent = df_agent.sample(frac=1.0, random_state=42).reset_index(drop=True)
-
-    # Convert to NumPy array (required by scikit-learn)
-    return df_agent.to_numpy(dtype=np.float64)
+    print(f"  Total mixed dataset: {len(df)} rows")
+    return df.to_numpy(dtype=np.float64)
 
 
 # ==========================================
@@ -91,40 +105,22 @@ def build_quantizer(states, n_clusters):
     """
     Train a vector quantizer (MiniBatchKMeans) on the state data.
     """
-
-    # Sanity check: we need at least as many samples as clusters
     if len(states) < n_clusters:
         raise ValueError("Number of samples must be >= number of clusters.")
 
-    # ------------------------------------------
-    # STEP 1: SCALE THE DATA
-    # ------------------------------------------
-    # StandardScaler normalizes each feature so that:
-    # - mean = 0
-    # - standard deviation = 1
-    #
-    # This is important because KMeans uses distances,
-    # and we want all variables to have similar influence.
+    # Step 1: scale the data so all features have comparable influence
     scaler = StandardScaler()
     states_scaled = scaler.fit_transform(states)
 
-    # ------------------------------------------
-    # STEP 2: TRAIN K-MEANS (VECTOR QUANTIZATION)
-    # ------------------------------------------
-    # MiniBatchKMeans is a faster version of KMeans
-    # that works well for large datasets.
+    # Step 2: train MiniBatchKMeans
     quantizer = MiniBatchKMeans(
-        n_clusters=n_clusters,   # number of discrete states
-        random_state=42,         # reproducibility
-        batch_size=1024,         # size of mini-batches
-        n_init=10                # number of different initializations
+        n_clusters=n_clusters,
+        random_state=42,
+        batch_size=1024,
+        n_init=10,
     )
-
-    # Fit the model to the scaled data
     quantizer.fit(states_scaled)
 
-    # Return both scaler and quantizer
-    # (we need both later!)
     return scaler, quantizer
 
 
@@ -133,57 +129,46 @@ def build_quantizer(states, n_clusters):
 # ==========================================
 
 def main():
+    print("=" * 60)
+    print("VQQL Discretization - training the vector quantizer")
+    print("=" * 60)
+    print(f"Number of clusters: {N_CLUSTERS}")
+    print(f"Samples per source: {SAMPLES_PER_SOURCE}")
+    print()
     print("Loading and mixing state data...")
 
-    # Load and combine data from both sources
     states = load_and_mix_states(
+        KEYBOARD_CSV,
         AGENT_CSV,
         STATE_COLUMNS,
-        SAMPLES_PER_SOURCE
+        SAMPLES_PER_SOURCE,
     )
 
-    # Print shape of dataset (rows, columns)
-    print("States shape:", states.shape)
+    print(f"\nStates shape: {states.shape}")
 
-    print("Training vector quantizer...")
-
-    # Train the scaler + quantizer
+    print("\nTraining vector quantizer...")
     scaler, quantizer = build_quantizer(states, N_CLUSTERS)
-    
-    # Print the centroids
-    # Convert centroids back to original scale
+
+    # Show centroids in original (unscaled) space for inspection
     centroids = scaler.inverse_transform(quantizer.cluster_centers_)
+    df_centroids = pd.DataFrame(centroids, columns=STATE_COLUMNS)
+    print("\nFirst 10 centroids (in original units):")
+    print(df_centroids.head(10).to_string(index=False))
 
-    # Create a DataFrame for easier inspection
-    df_centroids = pd.DataFrame(
-        centroids,
-        columns=STATE_COLUMNS
-    )
-    # Print a preview
-    print("\nCentroids:")
-    print(df_centroids)
-
-    # Save the final model
-    print("Saving quantizer model...")
-
-    # Save everything needed to reuse the discretization
+    print("\nSaving quantizer model...")
     joblib.dump(
         {
             "scaler": scaler,
             "quantizer": quantizer,
             "state_columns": STATE_COLUMNS,
-            "n_clusters": N_CLUSTERS
+            "n_clusters": N_CLUSTERS,
         },
-        OUTPUT_FILE
+        OUTPUT_FILE,
     )
 
     print(f"Quantizer saved to {OUTPUT_FILE}")
-    print("Phase 1 completed successfully!")
+    print("Phase 2 quantizer training completed successfully!")
 
-
-# ==========================================
-# SCRIPT ENTRY POINT
-# ==========================================
 
 if __name__ == "__main__":
     main()
